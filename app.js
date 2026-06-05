@@ -23,12 +23,16 @@ const BUFFER_SIZE = 4;
 let targetFps = 24;
 let frameInterval = 1000 / targetFps;
 let renderMode = 1;
+let pixelMode = false;
 let readyToRender = false;
 
 // Grid & Dimensions
 let gridCols = 0, gridRows = 0;
 let charWidth = 0, charHeight = 0;
 let xPos = null, yPos = null;
+
+// Pixel Mode (--pixel) — ImageData pixel buffer
+let dotImageData = null;
 
 // Selection Layer optimization
 const textDecoder = new TextDecoder();
@@ -48,16 +52,6 @@ for (let i = 0; i < 128; i++) CHAR_LUT[i] = String.fromCharCode(i);
 function buildCanvas(cols, rows) {
     gridCols = cols;
     gridRows = rows;
-    ctx.font = 'bold 8px Courier New';
-    charWidth = Math.ceil(ctx.measureText('M').width);
-    charHeight = 8;
-    canvas.width  = cols * charWidth;
-    canvas.height = rows * charHeight;
-    canvas.style.display = 'block';
-
-    // Selection Layer Buffer
-    selectionBuffer = new Uint8Array((cols + 1) * rows);
-    for (let r = 0; r < rows; r++) selectionBuffer[r * (cols + 1) + cols] = 10; // Newline (\n)
 
     // Sizing and positioning for both layers
     const syncSize = (el) => {
@@ -69,15 +63,64 @@ function buildCanvas(cols, rows) {
         el.style.left = '0';
     };
 
-    syncSize(canvas);
-    syncSize(player);
+    if (pixelMode) {
+        // ── DOT MODE: 1 canvas pixel = 1 grid cell ──
+        canvas.width  = cols;
+        canvas.height = rows;
+        canvas.style.display = 'block';
+        canvas.style.imageRendering = 'pixelated';
+        dotImageData = ctx.createImageData(cols, rows);
+        // Pre-fill alpha channel to 255 (fully opaque)
+        const d = dotImageData.data;
+        for (let i = 3; i < d.length; i += 4) d[i] = 255;
+        syncSize(canvas);
+        // Hide selection layer — no text to select in dot mode
+        player.style.display = 'none';
+    } else {
+        // ── STANDARD ASCII MODES (1-5) ──
+        canvas.style.imageRendering = '';
+        dotImageData = null;
+        ctx.font = 'bold 8px Courier New';
+        charWidth = ctx.measureText('M').width;
+        charHeight = 8;
+        canvas.width  = cols * charWidth;
+        canvas.height = rows * charHeight;
+        canvas.style.display = 'block';
 
-    ctx.font = 'bold 8px Courier New';
-    ctx.textBaseline = 'top';
-    xPos = new Float32Array(cols);
-    yPos = new Float32Array(rows);
-    for (let c = 0; c < cols; c++) xPos[c] = c * charWidth;
-    for (let r = 0; r < rows; r++) yPos[r] = r * charHeight;
+        // Selection Layer Buffer
+        selectionBuffer = new Uint8Array((cols + 1) * rows);
+        for (let r = 0; r < rows; r++) selectionBuffer[r * (cols + 1) + cols] = 10;
+
+        syncSize(canvas);
+
+        // Selection layer: match canvas object-fit:contain position exactly
+        const containerW = container.clientWidth;
+        const containerH = container.clientHeight;
+        const fitScaleX = containerW / canvas.width;
+        const fitScaleY = containerH / canvas.height;
+        const fitScale  = Math.min(fitScaleX, fitScaleY);
+        const renderedW = canvas.width  * fitScale;
+        const renderedH = canvas.height * fitScale;
+        const offsetX   = (containerW - renderedW) / 2;
+        const offsetY   = (containerH - renderedH) / 2;
+
+        player.style.width  = canvas.width + 'px';
+        player.style.height = canvas.height + 'px';
+        player.style.position = 'absolute';
+        player.style.top = '0';
+        player.style.left = '0';
+        player.style.transformOrigin = 'top left';
+        player.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${fitScale})`;
+        player.style.fontSize = '8px';
+        player.style.lineHeight = '8px';
+
+        ctx.font = 'bold 8px Courier New';
+        ctx.textBaseline = 'top';
+        xPos = new Float32Array(cols);
+        yPos = new Float32Array(rows);
+        for (let c = 0; c < cols; c++) xPos[c] = c * charWidth;
+        for (let r = 0; r < rows; r++) yPos[r] = r * charHeight;
+    }
 }
 
 // ═══════════════════════════════════════
@@ -120,6 +163,7 @@ function connectWebSocket() {
                 targetFps = parseFloat(p[1]);
                 frameInterval = 1000 / targetFps;
                 renderMode = parseInt(p[2]);
+                pixelMode = (p.length > 5 && parseInt(p[5]) === 1);
                 buildCanvas(parseInt(p[3]), parseInt(p[4]));
 
                 // Reload audio on every INIT so each video's audio plays correctly.
@@ -183,7 +227,8 @@ function renderFrame(now) {
         frameCount = 0;
         lastFpsUpdate = now;
         const modes = { 2: '512 Color', 3: '32K Color', 4: '262K Color', 5: '16M Ultra' };
-        statusEl.textContent = `FPS: ${currentFps}/${Math.round(targetFps)} | Buf: ${frameBuffer.length} | ${modes[renderMode] || 'B&W'}`;
+        const label = (modes[renderMode] || 'B&W') + (pixelMode ? ' PIXEL' : '');
+        statusEl.textContent = `FPS: ${currentFps}/${Math.round(targetFps)} | Buf: ${frameBuffer.length} | ${label}`;
     }
 
     if (frameBuffer.length === 0) return;
@@ -194,7 +239,20 @@ function renderFrame(now) {
         player.style.display = 'block';
         player.style.color = '#fff';
         player.textContent = frame;
+    } else if (pixelMode) {
+        // ── DOT MODE: ImageData pixel blast (1 draw call) ──
+        const view = new Uint8Array(frame);
+        const data = dotImageData.data;
+        // view: [char,R,G,B, char,R,G,B, ...] → data: [R,G,B,A, R,G,B,A, ...]
+        for (let src = 0, dst = 0; src < view.length; src += 4, dst += 4) {
+            data[dst]     = view[src + 1]; // R
+            data[dst + 1] = view[src + 2]; // G
+            data[dst + 2] = view[src + 3]; // B
+            // Alpha already set to 255 in buildCanvas
+        }
+        ctx.putImageData(dotImageData, 0, 0);
     } else {
+        // ── STANDARD COLOR MODES (2-5): fillText per character ──
         const view = new Uint8Array(frame);
         
         // 1. Draw Canvas (Background)

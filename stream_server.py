@@ -312,7 +312,12 @@ async def websocket_endpoint(websocket: WebSocket):
             frame_buf = np.empty((rows, cols, 4), dtype=np.uint8) if render_mode > 1 else None
 
             import struct
+            import time
             start_time = asyncio.get_event_loop().time()
+            bw_start_time = time.time()
+            bw_bytes_sent = 0
+            bw_raw_bytes = 0
+            debug_mode = getattr(app.state, "debug", False)
             frame_index = 0
             prev_frame = None  # previous framebuffer snapshot for delta coding
 
@@ -341,16 +346,21 @@ async def websocket_endpoint(websocket: WebSocket):
 
                     if pixel_mode:
                         # ── PIXEL MODE: raw BGR (3 bytes/cell) ──
+                        raw_size = 4 + rows * cols * 3
                         if adaptive:
                             msg, prev_frame = encode_frame(
                                 np.ascontiguousarray(bgr_frame),
                                 prev_frame, frame_index, tolerance=tolerance)
                             await websocket.send_bytes(msg)
+                            bw_bytes_sent += len(msg)
+                            bw_raw_bytes += raw_size
                         else:
                             # ── ZERO-COPY PIXEL MODE (legacy) ──
                             struct.pack_into(">I", pixel_send_buf, 0, frame_index)
                             pixel_send_buf[4:] = bgr_frame.tobytes()
                             await websocket.send_bytes(bytes(pixel_send_buf))
+                            bw_bytes_sent += len(pixel_send_buf)
+                            bw_raw_bytes += len(pixel_send_buf)
                     else:
                         indices = np.floor_divide(gray_frame, max(1, 256 // mapper._n))
                         np.clip(indices, 0, mapper._n - 1, out=indices)
@@ -358,7 +368,11 @@ async def websocket_endpoint(websocket: WebSocket):
                         if render_mode == 1:
                             char_matrix = mapper._lut[indices]
                             lines = [''.join(row) for row in char_matrix]
-                            await websocket.send_text(f"{frame_index}\n" + '\n'.join(lines))
+                            payload = f"{frame_index}\n" + '\n'.join(lines)
+                            await websocket.send_text(payload)
+                            payload_size = len(payload.encode('utf-8'))
+                            bw_bytes_sent += payload_size
+                            bw_raw_bytes += payload_size
                         else:
                             char_codes = char_byte_lut[indices]
                             rgb = bgr_frame[:, :, ::-1]
@@ -366,15 +380,30 @@ async def websocket_endpoint(websocket: WebSocket):
                                 rgb = (rgb >> qb) << qb
                             frame_buf[:, :, 0] = char_codes
                             frame_buf[:, :, 1:] = rgb
+                            raw_size = 4 + rows * cols * 4
                             if adaptive:
                                 msg, prev_frame = encode_frame(
                                     frame_buf, prev_frame, frame_index,
                                     tolerance=tolerance)
                                 await websocket.send_bytes(msg)
+                                bw_bytes_sent += len(msg)
+                                bw_raw_bytes += raw_size
                             else:
                                 struct.pack_into(">I", ascii_send_buf, 0, frame_index)
                                 ascii_send_buf[4:] = frame_buf.tobytes()
                                 await websocket.send_bytes(bytes(ascii_send_buf))
+                                bw_bytes_sent += len(ascii_send_buf)
+                                bw_raw_bytes += len(ascii_send_buf)
+
+                    current_time = time.time()
+                    if debug_mode and current_time - bw_start_time >= 1.0:
+                        raw_kbps = bw_raw_bytes / 1024
+                        wire_kbps = bw_bytes_sent / 1024
+                        ratio = raw_kbps / wire_kbps if wire_kbps > 0 else 0
+                        print(f"[BW] RAW: {raw_kbps:.1f} KB/s | WIRE: {wire_kbps:.1f} KB/s | {ratio:.1f}x compression")
+                        bw_start_time = current_time
+                        bw_bytes_sent = 0
+                        bw_raw_bytes = 0
 
                     elapsed = asyncio.get_event_loop().time() - start_time
                     wait = (frame_index * frame_t) - elapsed
@@ -557,6 +586,7 @@ if __name__ == "__main__":
     # ── Server ──
     srv = parser.add_argument_group('\033[33mServer\033[0m')
     srv.add_argument("--port", type=int, default=8000, help="Server port (default: 8000)")
+    srv.add_argument("--debug", action="store_true", default=False, help="Enable bandwidth debug logging (RAW vs WIRE)")
 
     args = parser.parse_args()
 
@@ -577,6 +607,7 @@ if __name__ == "__main__":
     app.state.current_index = 0
     app.state.loop          = args.loop
     app.state.tolerance     = {"lossless": 0, "high": 4, "balanced": 8, "low": 16}[args.quality]
+    app.state.debug         = args.debug
     global_default_cols     = args.cols if args.cols is not None else (450 if args.pixel else 200)
     app.state.cols          = global_default_cols
     app.state.rows          = args.rows

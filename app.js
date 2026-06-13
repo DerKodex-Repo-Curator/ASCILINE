@@ -20,6 +20,7 @@ let state = 'IDLE'; // IDLE | PLAYING
 let ws = null;
 const frameBuffer = [];
 const BUFFER_SIZE = 4;
+let codecDecoder = null; // Adaptive codec decoder (codec.js)
 let targetFps = 24;
 let frameInterval = 1000 / targetFps;
 let renderMode = 1;
@@ -145,7 +146,7 @@ function connectWebSocket() {
     // Don't preload here — causes race conditions with vol=0 (204 response).
 
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    ws = new WebSocket(`${protocol}//${location.host}/ws`);
+    ws = new WebSocket(`${protocol}//${location.host}/ws?codec=adaptive`);
     ws.binaryType = 'arraybuffer';
 
     ws.onmessage = (event) => {
@@ -164,6 +165,13 @@ function connectWebSocket() {
                 renderMode = parseInt(p[2]);
                 pixelMode = (p.length > 5 && parseInt(p[5]) === 1);
                 buildCanvas(parseInt(p[3]), parseInt(p[4]));
+
+                // Initialize adaptive codec decoder (pixel=3 bytes, ASCII color=4 bytes)
+                if (typeof AscilineCodec !== 'undefined' && renderMode > 1) {
+                    codecDecoder = AscilineCodec.makeDecoder(pixelMode ? 3 : 4);
+                } else {
+                    codecDecoder = null;
+                }
 
                 // ── AUDIO READY GATE ──
                 // Buffer video frames but don't render until audio is ready.
@@ -211,13 +219,21 @@ function connectWebSocket() {
             const frameData = text.substring(newlineIdx + 1);
             frameBuffer.push({ data: frameData, time: frameTime });
         } else {
-            // Binary Frames with 4-byte header
-            const buffer = event.data;
-            const view = new DataView(buffer);
-            const frameIndex = view.getUint32(0, false); // Big-endian
-            const frameTime = frameIndex / targetFps;
-            const frameData = new Uint8Array(buffer, 4);
-            frameBuffer.push({ data: frameData, time: frameTime });
+            // Binary Frames — decoded via adaptive codec (raw/zlib/delta)
+            if (codecDecoder) {
+                codecDecoder.decode(event.data).then(({ frameIndex, frame }) => {
+                    const frameTime = frameIndex / targetFps;
+                    frameBuffer.push({ data: frame, time: frameTime });
+                });
+            } else {
+                // Fallback: legacy 4-byte header
+                const buffer = event.data;
+                const view = new DataView(buffer);
+                const frameIndex = view.getUint32(0, false);
+                const frameTime = frameIndex / targetFps;
+                const frameData = new Uint8Array(buffer, 4);
+                frameBuffer.push({ data: frameData, time: frameTime });
+            }
         }
 
         while (frameBuffer.length > BUFFER_SIZE * 5) frameBuffer.shift();

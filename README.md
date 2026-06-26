@@ -131,13 +131,20 @@ python stream_server.py video.mp4 --cols 240
 python stream_server.py "https://youtu.be/VIDEO_ID" --cols 240
 python stream_server.py "https://www.youtube.com/playlist?list=..." --cols 220 --loop
 ```
-A single video is downloaded (≤480p — ASCILINE only needs a tiny grid) and cached
-in `videos/` by id, so replays are instant. A playlist/channel URL expands into one
-queue entry per video, each fetched on demand as it plays. A `playlist.json` may
-also list URLs; those are fetched lazily too, so the server starts immediately
-instead of downloading the whole list up front. Every download is normalized to a
-standard H.264/AAC/constant-frame-rate mp4 so playback and audio stay reliable
-regardless of the source codec.
+**🧹Garbage Collection for yt**
+
+ASCILINE includes a built-in LRU (Least Recently Used) garbage collector for on-demand YouTube downloads. To prevent your server's disk space from overflowing, you can set a maximum cache limit.
+You can set the limit in Megabytes (MB) using the `--cache-limit` flag. By default, it is set to `10240` (10 GB).
+
+```bash
+# Set the maximum video cache size to 5000 MB (5 GB)
+python stream_server.py --cache-limit 5000
+```
+### ⚙️ How It Works
+* **Bandwidth Optimized:** ASCII rendering only requires a tiny grid, so yt-dlp automatically fetches videos at ≤480p to save bandwidth.
+* **Smart Caching:** Videos are downloaded and cached by their ID in the `videos/` folder. Replays are instant!
+* **Lazy Loading:** Playlist/channel URLs or `playlist.json` files expand into a queue and fetch videos strictly *on-demand*. The server starts immediately instead of waiting for bulk downloads.
+* **Standardized Playback:** Every downloaded video is normalized to a standard H.264/AAC constant-frame-rate format. This ensures flawless audio/video synchronization regardless of the original source codec.
 
 **Folder mode — drop your videos into `videos/` and run:**
 ```bash

@@ -102,6 +102,23 @@ class AscilinePlayer {
         this.gridCols = cols;
         this.gridRows = rows;
 
+        // For ASCII mode, measure actual char dimensions FIRST so container height uses correct aspect ratio
+        let charWForLayout = 1, charHForLayout = 1;
+        if (!this.pixelMode) {
+            this.ctx.font = 'bold 8px Courier New';
+            charWForLayout = this.ctx.measureText('M').width;
+            charHForLayout = 8;
+        }
+
+        // Set container height based on TRUE aspect ratio (accounts for non-square characters)
+        const containerW = this.container.clientWidth || window.innerWidth;
+        const trueCanvasW = this.pixelMode ? cols : cols * charWForLayout;
+        const trueCanvasH = this.pixelMode ? rows : rows * charHForLayout;
+        const naturalH = Math.round(containerW * (trueCanvasH / trueCanvasW));
+        const maxH = Math.round(window.innerHeight * 0.72);
+        const containerH = Math.min(naturalH, maxH);
+        this.container.style.height = containerH + 'px';
+
         const syncSize = (el) => {
             el.style.width  = this.container.clientWidth + 'px';
             el.style.height = this.container.clientHeight + 'px';
@@ -124,9 +141,8 @@ class AscilinePlayer {
         } else {
             this.canvas.style.imageRendering = '';
             this.dotImageData = null;
-            this.ctx.font = 'bold 8px Courier New';
-            this.charWidth = this.ctx.measureText('M').width;
-            this.charHeight = 8;
+            this.charWidth = charWForLayout;
+            this.charHeight = charHForLayout;
             this.canvas.width  = cols * this.charWidth;
             this.canvas.height = rows * this.charHeight;
             this.canvas.style.display = 'block';
@@ -140,15 +156,21 @@ class AscilinePlayer {
             const offsetX   = (this.container.clientWidth - (this.canvas.width * fitScale)) / 2;
             const offsetY   = (this.container.clientHeight - (this.canvas.height * fitScale)) / 2;
 
-            this.player.style.width  = this.canvas.width + 'px';
-            this.player.style.height = this.canvas.height + 'px';
+            // Position pre at exact VISUAL size (no transform scale) so text selection works correctly
+            const visW = this.canvas.width * fitScale;
+            const visH = this.canvas.height * fitScale;
+            const scaledCharW = this.charWidth * fitScale;
+            const scaledCharH = this.charHeight * fitScale;
+
+            this.player.style.width  = visW + 'px';
+            this.player.style.height = visH + 'px';
             this.player.style.position = 'absolute';
-            this.player.style.top = '0';
-            this.player.style.left = '0';
-            this.player.style.transformOrigin = 'top left';
-            this.player.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${fitScale})`;
-            this.player.style.fontSize = '8px';
-            this.player.style.lineHeight = '8px';
+            this.player.style.top = offsetY + 'px';
+            this.player.style.left = offsetX + 'px';
+            this.player.style.transform = 'none';
+            this.player.style.fontSize = scaledCharH + 'px';
+            this.player.style.lineHeight = scaledCharH + 'px';
+            this.player.style.letterSpacing = '0px';
 
             this.ctx.font = 'bold 8px Courier New';
             this.ctx.textBaseline = 'top';
@@ -380,9 +402,14 @@ class AscilinePlayer {
         }
     }
 
+    stop() {
+        this.finishStream();
+    }
+
     finishStream() {
         this.state = 'IDLE';
         this.isStreaming = false;
+        this.frameBuffer = [];
         if (this.fetchAbortController) {
             this.fetchAbortController.abort();
             this.fetchAbortController = null;

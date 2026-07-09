@@ -43,25 +43,40 @@ _DELTA_MAX_FRAC = 0.60   # above this, delta loses — don't bother building it
 _ZLIB_MIN_FRAC = 0.10    # below this, full-frame zlib loses — don't bother
 
 def _rle_encode(frame: np.ndarray) -> bytes:
-    """Run-Length Encoding of a full frame. Returns bytes."""
+    """Run-Length Encoding of a full frame. Fully vectorized with NumPy."""
     C = frame.shape[2]
     flat = frame.reshape(-1, C)
+    n = len(flat)
+
+    # Find run boundaries
     diffs = np.any(flat[1:] != flat[:-1], axis=1)
-    change_indices = np.where(diffs)[0] + 1
-    change_indices = np.concatenate(([0], change_indices, [len(flat)]))
-    run_lengths = np.diff(change_indices)
-    values = flat[change_indices[:-1]]
-    
+    change_indices = np.concatenate(([0], np.where(diffs)[0] + 1, [n]))
+    run_lengths = np.diff(change_indices)          # (num_runs,)
+    values = flat[change_indices[:-1]]             # (num_runs, C)
+
+    # Most runs fit in uint16 — handle overflow by splitting into 65535-chunks
+    # Overflow is extremely rare; fast path for the common case
+    if run_lengths.max() <= 65535:
+        counts = run_lengths.astype(np.uint16)
+        # Interleave: [count(2 bytes) | value(C bytes)] for each run
+        num_runs = len(counts)
+        # Write counts in little-endian uint16
+        count_view = counts.view(np.uint8).reshape(num_runs, 2)
+        # Interleave: reshape to (num_runs, 2+C), then ravel
+        out = np.empty(num_runs * (2 + C), dtype=np.uint8)
+        out_view = out.reshape(num_runs, 2 + C)
+        out_view[:, :2] = count_view
+        out_view[:, 2:] = values
+        return out.tobytes()
+
+    # Slow fallback for pathological cases with runs > 65535
     out = bytearray()
-    for count, val in zip(run_lengths, values):
-        val_bytes = val.tobytes()
+    for count, val in zip(run_lengths.tolist(), values.tolist()):
+        val_bytes = bytes(val)
         while count > 65535:
-            out.extend(struct.pack("<H", 65535))
-            out.extend(val_bytes)
+            out += struct.pack('<H', 65535) + val_bytes
             count -= 65535
-        if count > 0:
-            out.extend(struct.pack("<H", count))
-            out.extend(val_bytes)
+        out += struct.pack('<H', count) + val_bytes
     return bytes(out)
 
 def _full_frame(raw: bytes, frame: np.ndarray, frame_index: int, level: int) -> bytes:

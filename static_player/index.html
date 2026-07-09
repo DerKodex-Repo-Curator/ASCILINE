@@ -3,119 +3,342 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ASCILINE VOD Player</title>
+    <title>ASCILINE Static Player</title>
     <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
         body {
             background-color: #050505;
             color: #00ff41;
-            margin: 0;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-            overflow: hidden;
-            font-family: monospace;
+            font-family: 'Courier New', monospace;
+            min-height: 100vh;
         }
-        #ascii-container {
+
+        /* ── HEADER ── */
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 24px;
+            border-bottom: 1px solid #00ff4130;
+        }
+        header .logo { font-size: 1.2em; letter-spacing: 4px; font-weight: bold; }
+        header .subtitle { font-size: 0.7em; color: #00ff4180; }
+
+        /* ── SETUP BANNER ── */
+        #setup-banner {
+            background: #0a1a0a;
+            border: 1px solid #00ff4130;
+            border-radius: 8px;
+            margin: 24px auto;
+            max-width: 860px;
+            padding: 24px 28px;
+        }
+        #setup-banner h2 {
+            font-size: 0.85em;
+            letter-spacing: 2px;
+            color: #00ff4199;
+            margin-bottom: 16px;
+        }
+        #setup-banner p {
+            font-size: 0.78em;
+            color: #00ff4177;
+            line-height: 1.7;
+            margin-bottom: 14px;
+        }
+        .step {
+            display: flex;
+            gap: 14px;
+            margin-bottom: 12px;
+            align-items: flex-start;
+        }
+        .step-num {
+            min-width: 22px;
+            height: 22px;
+            border: 1px solid #00ff41;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.7em;
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
+        .step-text { font-size: 0.78em; color: #00ff4199; line-height: 1.6; }
+        code {
+            background: #001a00;
+            border: 1px solid #00ff4140;
+            border-radius: 4px;
+            padding: 2px 8px;
+            font-size: 0.92em;
+            color: #00ff41;
+        }
+        .code-block {
+            background: #001a00;
+            border: 1px solid #00ff4130;
+            border-radius: 6px;
+            padding: 12px 16px;
+            margin: 10px 0;
+            font-size: 0.78em;
+            color: #00ff41cc;
+            line-height: 1.8;
+            overflow-x: auto;
+            white-space: pre;
+        }
+
+        /* ── PLAYER AREA ── */
+        #player-area {
+            max-width: 860px;
+            margin: 0 auto 24px;
+            padding: 0 24px;
+        }
+        #player-area h2 {
+            font-size: 0.85em;
+            letter-spacing: 2px;
+            color: #00ff4199;
+            margin-bottom: 16px;
+        }
+
+        /* URL input row */
+        .input-row {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+        .input-row label {
+            font-size: 0.72em;
+            color: #00ff4177;
+            white-space: nowrap;
+            align-self: center;
+            min-width: 60px;
+        }
+        .input-row input {
+            flex: 1;
+            background: #001a00;
+            border: 1px solid #00ff4140;
+            border-radius: 5px;
+            color: #00ff41;
+            font-family: 'Courier New', monospace;
+            font-size: 0.8em;
+            padding: 8px 12px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .input-row input:focus { border-color: #00ff41; }
+        .input-row input::placeholder { color: #00ff4140; }
+
+        #play-btn {
             width: 100%;
-            height: 100%;
+            margin-top: 8px;
+            padding: 11px;
+            background: transparent;
+            border: 1px solid #00ff41;
+            border-radius: 6px;
+            color: #00ff41;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85em;
+            letter-spacing: 3px;
+            cursor: pointer;
+            transition: background 0.2s, color 0.2s;
+        }
+        #play-btn:hover { background: #00ff41; color: #000; }
+        #play-btn:disabled { opacity: 0.4; cursor: default; }
+
+        /* ── CANVAS CONTAINER ── */
+        #canvas-container {
+            position: relative;
+            width: 100%;
+            border: 1px solid #00ff4130;
+            border-radius: 8px;
+            overflow: visible;
+            margin-top: 16px;
+            background: #000;
+            display: none;
+        }
+        #canvas-container.active { display: block; }
+        #player-container {
+            position: relative;
+            width: 100%;
+            background: #000;
+        }
+        #player-container canvas.ascii-canvas {
+            display: none;
+            width: 100% !important;
+            height: auto !important;
+            max-height: 70vh;
+            object-fit: contain;
+            position: relative;
+            z-index: 1;
+        }
+        #player-container pre.ascii-player {
+            display: none;
+            white-space: pre;
+            font-family: 'Courier New', Courier, monospace;
+            font-weight: bold;
+            font-size: 0.55em;
+            line-height: 1;
+            overflow: visible;
+            position: absolute;
+            z-index: 2;
+            user-select: text;
+            -webkit-user-select: text;
+            cursor: text;
+        }
+        #status-bar {
+            position: absolute;
+            bottom: 0; left: 0; right: 0;
+            padding: 6px 12px;
+            font-size: 0.65em;
+            color: #00ff4177;
+            background: rgba(0,0,0,0.6);
             display: flex;
-            justify-content: center;
-            align-items: center;
+            justify-content: space-between;
         }
-        .hidden { display: none !important; }
-        
-        .overlay-box {
-            position: absolute; 
-            top: 50%; left: 50%; 
-            transform: translate(-50%, -50%); 
-            z-index: 10; 
-            background: rgba(5,5,5,0.95); 
-            padding: 30px; 
-            border: 1px solid #00ff41; 
-            text-align: center;
-            box-shadow: 0 0 20px rgba(0, 255, 65, 0.2);
-            min-width: 400px;
-        }
-        
-        button {
-            background: none; 
-            border: 1px solid #00ff41; 
-            color: #00ff41; 
-            padding: 10px 20px; 
-            cursor: pointer; 
-            font-family: monospace;
-            font-size: 16px;
-            transition: all 0.2s;
-        }
-        button:hover {
-            background: #00ff41;
-            color: #050505;
-        }
-        button:disabled {
-            border-color: #333;
-            color: #333;
-            cursor: not-allowed;
-            background: none;
+
+        /* Error message */
+        #error-msg {
+            display: none;
+            margin-top: 10px;
+            padding: 10px 14px;
+            border: 1px solid #ff4444;
+            border-radius: 6px;
+            color: #ff4444;
+            font-size: 0.75em;
+            background: #1a0000;
         }
     </style>
 </head>
 <body>
-    <div id="container-main" style="width: 100vw; height: 100vh; position: relative;">
-        <div class="ascii-player" style="width: 100%; height: 100%;">
-            <canvas class="ascii-canvas" style="width: 100%; height: 100%; display: block;"></canvas>
-        </div>
-        
-        <div id="status-overlay" class="overlay-box">
-            <h1 style="margin-top: 0; border-bottom: 1px solid #00ff41; padding-bottom: 10px;">ASCILINE VOD PLAYER</h1>
-            <div style="text-align: left; margin-bottom: 25px; line-height: 1.6;">
-                <p><strong>1. Compile a video:</strong><br><span style="color: #888;">python compiler.py input.mp4 --out demo</span></p>
-                <p><strong>2. Start local server:</strong><br><span style="color: #888;">python -m http.server 8080</span></p>
-                <p><strong>3. Edit <code>index.html</code></strong><br><span style="color: #888;">Change line 86 to point to your .ascf file.</span></p>
-            </div>
-            
-            <div id="controls-main" class="hidden">
-                <button id="play-main">PLAY VIDEO</button>
-            </div>
+
+<header>
+    <div>
+        <div class="logo">ASCILINE</div>
+        <div class="subtitle">STATIC PLAYER</div>
+    </div>
+</header>
+
+<!-- SETUP GUIDE -->
+<div id="setup-banner">
+    <h2>// HOW TO PLAY A VIDEO</h2>
+    <p>You need a compiled <code>.ascf</code> file. Use <code>compiler.py</code> from this folder to create one:</p>
+
+    <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-text">
+            Open a terminal and go to the <code>static_player</code> folder:
+            <div class="code-block">cd path/to/ASCILINE/static_player</div>
         </div>
     </div>
+    <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-text">
+            Compile your video (MP4, AVI, etc.):
+            <div class="code-block"># Default ASCII mode (Mode 5 - Colored characters):
+python compiler.py your_video.mp4 --cols 160 --mode 5
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
-    <script src="codec.js"></script>
-    <script src="reader.js"></script>
-    <script>
-        // Initialize the player
-        const player = new AscilinePlayer(document.getElementById('container-main'), { 
-            fontSize: 10,
-            pixelMode: true
-        });
+# Smaller file size for ASCII mode (lossy color tolerance):
+python compiler.py your_video.mp4 --cols 160 --mode 5 --tolerance 10
 
-        const playBtn = document.getElementById('play-main');
-        const overlay = document.getElementById('status-overlay');
+# Pixel mode (no characters, just colors). Use higher cols for better quality:
+python compiler.py your_video.mp4 --cols 250 --pixel --quantize 2</div>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-text">
+            Serve this folder with a local server (required by the browser):
+            <div class="code-block">python -m http.server 8080</div>
+            Then open <code>http://localhost:8080</code> in your browser.
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-text">
+            Enter the filename of your compiled <code>.ascf</code> file below and press PLAY.
+        </div>
+    </div>
+</div>
 
-        playBtn.addEventListener('click', async () => {
-            playBtn.disabled = true;
-            playBtn.innerText = "LOADING...";
-            
-            try {
-                // Hide overlay immediately so the video is visible
-                overlay.style.display = 'none';
-                
-                // TODO: Change 'demo.ascf' to your actual compiled video file name
-                // Example: await player.play('demo.ascf', 'demo.mp3');
-                await player.play('bad_applepix.ascf'); 
-            } catch (err) {
-                overlay.innerHTML = `
-                    <h2 style="color: #ff3333; margin-top:0;">CONNECTION FAILED</h2>
-                    <p style="text-align: left;">Could not load the video file.</p>
-                    <p style="color: #ff3333; text-align: left; background: #111; padding: 10px; border-left: 3px solid #ff3333;">${err.message}</p>
-                    <p style="font-size: 14px; margin-top: 20px; color: #888;">Did you compile a video and update index.html?</p>
-                `;
-            }
-        });
+<!-- PLAYER CONTROLS -->
+<div id="player-area">
+    <h2>// PLAYER</h2>
 
-        // Setup canvas and reveal play button
-        document.getElementById('controls-main').classList.remove('hidden');
-    </script>
+    <div class="input-row">
+        <label>.ascf</label>
+        <input type="text" id="ascf-input" placeholder="output.ascf" value="">
+    </div>
+    <div class="input-row">
+        <label>.mp3</label>
+        <input type="text" id="audio-input" placeholder="output.mp3  (optional)" value="">
+    </div>
+
+    <button id="play-btn">▶ PLAY</button>
+    <div id="error-msg"></div>
+
+    <div id="canvas-container">
+        <!-- Real container with the class structure AscilinePlayer expects -->
+        <div id="player-container" style="position:relative; width:100%; min-height:360px;">
+            <div class="status" id="status-text" style="position:absolute;top:8px;left:12px;z-index:10;font-size:0.7em;color:#00ff4199;"></div>
+            <pre class="ascii-player" style="display:none; white-space:pre; font-size:0.55em; line-height:1;"></pre>
+            <canvas class="ascii-canvas" style="display:none; width:100%; height:auto;"></canvas>
+            <audio class="ascii-audio" preload="none"></audio>
+        </div>
+        <div id="status-bar">
+            <span id="status-label">Ready</span>
+            <span id="frame-counter"></span>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
+<script src="codec.js"></script>
+<script src="reader.js"></script>
+<script>
+    const playBtn        = document.getElementById('play-btn');
+    const ascfInput      = document.getElementById('ascf-input');
+    const audioInput     = document.getElementById('audio-input');
+    const errorMsg       = document.getElementById('error-msg');
+    const canvasWrap     = document.getElementById('canvas-container');
+    const playerContainer = document.getElementById('player-container');
+
+    let player = null;
+
+    playBtn.addEventListener('click', async () => {
+        const ascfUrl = ascfInput.value.trim();
+        if (!ascfUrl) { showError('Please enter a .ascf filename.'); return; }
+
+        hideError();
+
+        // Stop and fully destroy previous player
+        if (player) {
+            player.stop();
+            player = null;
+        }
+
+        // Reset the player-container innerHTML so there's no leftover canvas
+        playerContainer.innerHTML = `
+            <div class="status" style="position:absolute;top:8px;left:12px;z-index:10;font-size:0.7em;color:#00ff4199;"></div>
+            <pre class="ascii-player"></pre>
+            <canvas class="ascii-canvas"></canvas>
+            <audio class="ascii-audio" preload="none"></audio>
+        `;
+
+        canvasWrap.classList.add('active');
+
+        try {
+            player = new AscilinePlayer(playerContainer);
+            player.play(ascfUrl, audioInput.value.trim() || null).catch(err => {
+                showError('Playback error: ' + err.message +
+                    (err.message.includes('fetch') ? ' — Make sure you are running a local server (python -m http.server 8080).' : ''));
+            });
+        } catch(e) {
+            showError('Failed to start player: ' + e.message);
+        }
+    });
+
+    function showError(msg) { errorMsg.style.display = 'block'; errorMsg.textContent = msg; }
+    function hideError()    { errorMsg.style.display = 'none'; }
+</script>
+
 </body>
 </html>

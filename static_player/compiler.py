@@ -11,7 +11,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Import the existing engine components
 from ascii_video_player2 import VideoDecoder, AsciiMapper
-from codec import encode_frame
+from codec import encode_frame, DEFAULT_LEVEL
 
 def extract_audio(video_path: str, output_path: str):
     print(f"[Audio] Attempting to extract audio to {output_path}...")
@@ -44,7 +44,7 @@ def compile_video(args):
         return
 
     out_name = args.out or os.path.splitext(os.path.basename(video_path))[0]
-    out_dir = "static_template"
+    out_dir = "."
     os.makedirs(out_dir, exist_ok=True)
     
     ascf_path = os.path.join(out_dir, f"{out_name}.ascf")
@@ -54,6 +54,8 @@ def compile_video(args):
     render_mode = args.mode
     cols = args.cols
     tolerance = args.tolerance
+    level = 9 if args.hard else 3
+    pixel_qb = args.quantize  # bits to drop per channel in pixel mode (0 = lossless)
 
     # 1. Extract audio
     extract_audio(video_path, audio_path)
@@ -125,9 +127,12 @@ def compile_video(args):
                     break
 
                 if pixel_mode:
+                    frame_px = np.ascontiguousarray(bgr_frame)
+                    if pixel_qb > 0:
+                        frame_px = (frame_px >> pixel_qb) << pixel_qb
                     msg, prev_frame = encode_frame(
-                        np.ascontiguousarray(bgr_frame),
-                        prev_frame, frame_index, level=9, tolerance=tolerance
+                        frame_px,
+                        prev_frame, frame_index, level=level, tolerance=tolerance
                     )
                 else:
                     indices = np.floor_divide(gray_frame, max(1, 256 // mapper._n))
@@ -147,7 +152,7 @@ def compile_video(args):
                         frame_buf[:, :, 1:] = rgb
                         
                         msg, prev_frame = encode_frame(
-                            frame_buf, prev_frame, frame_index, level=9, tolerance=tolerance
+                            frame_buf, prev_frame, frame_index, level=level, tolerance=tolerance
                         )
                 
                 # Write length prefix (uint32) + payload
@@ -169,11 +174,13 @@ def compile_video(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="ASCILINE Static Compiler")
     parser.add_argument("video", help="Path to input video")
-    parser.add_argument("--cols", type=int, default=200, help="Grid columns")
+    parser.add_argument("--cols", type=int, default=300, help="Grid columns (default 300)")
     parser.add_argument("--rows", type=int, default=0, help="Grid rows (0 = auto)")
     parser.add_argument("--mode", type=int, default=5, choices=[1, 2, 3, 4, 5], help="Render mode")
     parser.add_argument("--pixel", action="store_true", help="Pixel mode (no characters)")
     parser.add_argument("--tolerance", type=int, default=0, help="Color drift tolerance (0=lossless)")
+    parser.add_argument("--hard", action="store_true", help="Use maximum zlib compression (level 9) instead of default (level 3). Slower but smaller file.")
+    parser.add_argument("--quantize", type=int, default=0, choices=[0, 1, 2, 3], metavar="0-3", help="Pixel mode color quantization: bits to drop per channel (0=lossless, 1=slight, 2=medium, 3=aggressive). Reduces file size.")
     parser.add_argument("--out", type=str, default="", help="Output base name")
     
     args = parser.parse_args()

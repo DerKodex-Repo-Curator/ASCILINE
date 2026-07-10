@@ -283,7 +283,14 @@ function connectWebSocket() {
                     frameBuffer.push({ data: frame, time: frameTime });
                 }).catch(e => {
                     framesInFlight--;
-                    console.error("Decode error", e);
+                    const isRleBug = e.message && e.message.includes("tag: 3");
+                    if (isRleBug) {
+                        statusEl.textContent = '⚠ DECODE BUG: RLE_FULL frame dropped! Visual corruption may follow.';
+                        statusEl.style.color = '#ff0000';
+                        statusEl.style.fontWeight = 'bold';
+                    } else {
+                        console.error("Decode error", e);
+                    }
                 });
             } else {
                 // Fallback: legacy 4-byte header

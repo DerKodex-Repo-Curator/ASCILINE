@@ -226,20 +226,14 @@ function connectWebSocket() {
                     codecDecoder = null;
                 }
 
-                // ── AUDIO READY GATE ──
-                // Buffer video frames but don't render until audio is ready.
-                // This prevents the 0.5s initial stutter.
-                readyToRender = false;
-                state = 'PLAYING';
+                // Sequential decode queue: ensures each frame is decoded strictly in
+                // arrival order. Without this, a fast Delta can overtake a slow
+                // Keyframe/ZLIB inflate and patch the wrong `prev` frame, causing
+                // visual corruption and the initial stutter.
+                decodeQueue = Promise.resolve();
 
-                const beginRendering = () => {
-                    readyToRender = true;
-                    streamStartTime = performance.now();
-                    lastRenderTime = performance.now();
-                    lastFpsUpdate = lastRenderTime;
-                    requestAnimationFrame(renderFrame);
-                    startBufferReports();
-                };
+                state = 'PLAYING';
+                readyToRender = true;
 
                 if (audioEl) {
                     audioEl.pause();
@@ -248,21 +242,14 @@ function connectWebSocket() {
                     audioEl.volume = volumeSlider ? volumeSlider.value : 1.0;
                     audioEl.load();
                     audioEl.play().catch(() => {});
-
-                    // Wait for audio to actually start playing
-                    if (audioEl.readyState >= 3) {
-                        beginRendering();
-                    } else {
-                        audioEl.addEventListener('playing', beginRendering, { once: true });
-                        // Fallback: if audio fails to load (vol=0 / 204), start after 500ms
-                        setTimeout(() => {
-                            if (!readyToRender) beginRendering();
-                        }, 500);
-                    }
-                } else {
-                    // No audio element at all → start immediately
-                    beginRendering();
                 }
+
+                streamStartTime = performance.now();
+                lastRenderTime = performance.now();
+                lastFpsUpdate = lastRenderTime;
+                requestAnimationFrame(renderFrame);
+                startBufferReports();
+                
                 return;
             }
             
@@ -277,14 +264,18 @@ function connectWebSocket() {
             // Binary Frames — decoded via adaptive codec (raw/zlib/delta)
             if (codecDecoder) {
                 framesInFlight++;
-                codecDecoder.decode(event.data).then(({ frameIndex, frame }) => {
-                    framesInFlight--;
-                    const frameTime = frameIndex / targetFps;
-                    frameBuffer.push({ data: frame, time: frameTime });
-                }).catch(e => {
-                    framesInFlight--;
-                    console.error("Decode error", e);
-                });
+                // Chain onto the sequential queue so deltas always patch the
+                // correct preceding frame, never racing ahead of a keyframe.
+                decodeQueue = decodeQueue.then(() =>
+                    codecDecoder.decode(event.data).then(({ frameIndex, frame }) => {
+                        framesInFlight--;
+                        const frameTime = frameIndex / targetFps;
+                        frameBuffer.push({ data: frame, time: frameTime });
+                    }).catch(e => {
+                        framesInFlight--;
+                        console.error("Decode error", e);
+                    })
+                );
             } else {
                 // Fallback: legacy 4-byte header
                 const buffer = event.data;
@@ -433,6 +424,9 @@ function renderFrame(now) {
 // (framesInFlight). When it grows, the client is CPU-bound, and the server 
 // drops frames instead of making us inflate+delta-patch them.
 let framesInFlight = 0;
+// Sequential promise chain that serialises async codec decodes so a fast
+// Delta never races ahead of a slow Keyframe/ZLIB inflate.
+let decodeQueue = Promise.resolve();
 
 function startBufferReports() {
     stopBufferReports();

@@ -284,9 +284,9 @@ Paths are resolved automatically — the project root and `videos/` are both che
 Live, browser-based showcase across multiple rendering modes: **[asciline.dev](https://www.asciline.dev)**
 
 ## Star History
-[![Star History Chart](https://api.star-history.com/svg?repos=YusufB5/ASCILINE&type=Date)](https://star-history.com/#YusufB5/ASCILINE&Date)
+[![Star History Chart](https://stars.unv.one/svg/YusufB5/ASCILINE?theme=dark)](https://github.com/YusufB5/ASCILINE)
 
-## Support
+## Support ❤️
 
 If this project is useful to you, crypto donations are welcome:
 - **Solana (SOL / USDC):** `H1wSQAhjgsu7AxenF4e5ZBYiBjkhDLVzkKaZuVPcrE14`

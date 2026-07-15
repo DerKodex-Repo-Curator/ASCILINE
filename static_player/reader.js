@@ -70,6 +70,8 @@ class AscilinePlayer {
 
         this.isStreaming = false;
         this.fetchAbortController = null;
+        this.decodeQueue = Promise.resolve();
+        this.pendingDecodes = 0;
 
         this.renderFrame = this.renderFrame.bind(this);
         this.togglePause = this.togglePause.bind(this);
@@ -281,10 +283,15 @@ class AscilinePlayer {
                                 const frameData = text.substring(newlineIdx + 1);
                                 this.frameBuffer.push({ data: frameData, time: frameTime });
                             } else if (this.codecDecoder) {
-                                this.codecDecoder.decode(frameBytes).then(({ frameIndex, frame }) => {
-                                    const frameTime = frameIndex / this.targetFps;
-                                    this.frameBuffer.push({ data: frame, time: frameTime });
-                                });
+                                const capturedBytes = frameBytes;
+                                this.pendingDecodes++;
+                                this.decodeQueue = this.decodeQueue.then(() =>
+                                    this.codecDecoder.decode(capturedBytes).then(({ frameIndex, frame }) => {
+                                        const frameTime = frameIndex / this.targetFps;
+                                        this.frameBuffer.push({ data: frame, time: frameTime });
+                                        this.pendingDecodes--;
+                                    }).catch(() => { this.pendingDecodes--; })
+                                );
                             }
                         } else {
                             break;
@@ -321,7 +328,7 @@ class AscilinePlayer {
         }
 
         if (this.frameBuffer.length === 0) {
-            if (this.isStreaming) {
+            if (this.isStreaming || this.pendingDecodes > 0) {
                 if (this.statusEl) this.statusEl.textContent = 'Buffering...';
             } else {
                 if (this.loop) {
@@ -410,6 +417,8 @@ class AscilinePlayer {
         this.state = 'IDLE';
         this.isStreaming = false;
         this.frameBuffer = [];
+        this.decodeQueue = Promise.resolve();
+        this.pendingDecodes = 0;
         if (this.fetchAbortController) {
             this.fetchAbortController.abort();
             this.fetchAbortController = null;

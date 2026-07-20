@@ -114,13 +114,27 @@ python static_player/compiler.py your_video.mp4 --cols 250 --pixel --quantize 2
 
 This is what powers the live demo at [asciline.dev](https://www.asciline.dev): the static clips there are compiled with this Python path.
 
-### 2. Browser Studio — compile without installing anything
+<a id="browser-studio"></a>
+### 2. Browser Studio — compile & watch without installing anything
 
-`static_player/studio/` is a standalone page (`index.html` + `encoder.js`, using `pako` from a CDN for deflate) that compiles a video to `.ascf` **entirely client-side** — drop a video in, get a `.ascf` out, nothing ever leaves the browser and no Python is required. It's the more experimental of the two paths (see the codec note above: it only emits RAW/ZLIB/DELTA, not RLE_FULL) and is best for quick, short clips rather than production output — for anything longer or size-sensitive, use the Python compiler.
+`static_player/studio/` is a standalone page (`index.html` + `encoder.js`, using `pako` from a CDN) that compiles a video to `.ascf` entirely client-side — drop a video in, get a `.ascf` out, nothing ever leaves your browser, no Python required.
 
-### Playing a compiled file
+The page includes a basic built-in preview, so you can see the result immediately with no server needed — but this quick preview lacks audio and ASCII/pixel mode switching.
 
-Place the generated `.ascf` next to `static_player/index.html` and open it through any local web server.
+It's also the more experimental of the two compilers: as noted above, it only emits RAW/ZLIB/DELTA, not RLE_FULL. Great for quick, short clips; for production output, longer files, or maximum compression, use the Python compiler instead.
+
+<a id="playing-a-compiled-file"></a>
+### Playing a compiled file (the full player)
+
+For the full experience — audio sync and live ASCII/pixel mode switching — use the main player at `static_player/index.html`.
+
+Modern browsers block `.ascf` fetches over `file://`, so you can't just double-click the file; serve the folder through a static file server instead:
+
+```bash
+python -m http.server
+```
+
+This is a plain local file server — it has nothing to do with ASCILINE's own backend, and playback stays 100% client-side.
 
 > **Best practice:** compile short clips (under 5–10 minutes). `.ascf` stores raw render instructions for the canvas, so full-length movies can produce file sizes that exceed your browser's memory limits.
 
@@ -316,7 +330,7 @@ Quick fixes for the most common issues. Full protocol/technical details will liv
 - **YouTube/URL playback fails or hangs** — make sure `yt-dlp` is installed (`pip install yt-dlp`); it's an optional dependency and isn't required for local file playback.
 - **First-run YouTube video is slow to start** — the server downloads and normalizes it to H.264/AAC first; every replay afterward is served instantly from the `videos/` cache.
 - **Disk filling up from cached downloads** — set a lower `--cache-limit` (in MB) to cap the LRU video cache.
-- **Studio (browser compiler) output is bigger than expected, or compiling takes a long time** — the browser-side encoder only emits RAW/ZLIB/DELTA (no RLE_FULL) and is meant for short clips. For long or size-sensitive videos, use the Python compiler (`static_player/compiler.py`) instead, then play the result with `static_player/index.html` — it's the same player either way and handles both audio and ASCII-mode playback.
+- **Studio (browser compiler) output is bigger than expected, or compiling takes a long time** — the browser-side encoder only emits RAW/ZLIB/DELTA (no RLE_FULL) and is meant for short clips. For long or size-sensitive videos, use the Python compiler (`static_player/compiler.py`) instead. See [Browser Studio](#browser-studio) and [Playing a compiled file](#playing-a-compiled-file) for the two preview options.
 - **Compiled `.ascf` file won't play / browser runs out of memory** — keep compiled clips under 5–10 minutes; `.ascf` stores raw render instructions, so long videos can exceed browser memory limits.
 
 ## Live Demo

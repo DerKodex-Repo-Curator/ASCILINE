@@ -206,6 +206,49 @@
             font-size: 0.75em;
             background: #1a0000;
         }
+
+        /* ── DRAG & DROP ── */
+        #drop-zone {
+            border: 2px dashed #00ff4140;
+            border-radius: 10px;
+            padding: 28px 20px;
+            text-align: center;
+            color: #00ff4166;
+            font-size: 0.8em;
+            letter-spacing: 1px;
+            cursor: pointer;
+            transition: border-color 0.2s, background 0.2s, color 0.2s;
+            margin-bottom: 16px;
+            user-select: none;
+        }
+        #drop-zone:hover, #drop-zone.drag-over {
+            border-color: #00ff41;
+            background: #00ff4108;
+            color: #00ff41;
+        }
+        #drop-zone .drop-icon { font-size: 1.8em; margin-bottom: 6px; }
+        #drop-zone .drop-hint { font-size: 0.75em; color: #00ff4144; margin-top: 4px; }
+        #drop-zone.has-file {
+            border-color: #00ff41;
+            background: #00ff4110;
+            color: #00ff41;
+        }
+
+        .section-divider {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin: 12px 0;
+            color: #00ff4133;
+            font-size: 0.7em;
+            letter-spacing: 2px;
+        }
+        .section-divider::before, .section-divider::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: #00ff4120;
+        }
     </style>
 </head>
 <body>
@@ -275,6 +318,15 @@ python compiler.py your_video.mp4 --cols 250 --pixel --quantize 2</div>
     <button id="play-btn">▶ PLAY</button>
     <div id="error-msg"></div>
 
+    <!-- DRAG & DROP ZONE -->
+    <div id="drop-zone">
+        <div class="drop-icon">⬇</div>
+        <div id="drop-label">Drop .ascf file here to play instantly</div>
+        <div class="drop-hint">(also drop .mp3 at the same time for audio)</div>
+    </div>
+
+    <div class="section-divider">OR USE URL</div>
+
     <div id="canvas-container">
         <!-- Real container with the class structure AscilinePlayer expects -->
         <div id="player-container" style="position:relative; width:100%; min-height:360px;">
@@ -338,6 +390,92 @@ python compiler.py your_video.mp4 --cols 250 --pixel --quantize 2</div>
 
     function showError(msg) { errorMsg.style.display = 'block'; errorMsg.textContent = msg; }
     function hideError()    { errorMsg.style.display = 'none'; }
+
+    // ── DRAG & DROP ──
+    const dropZone  = document.getElementById('drop-zone');
+    const dropLabel = document.getElementById('drop-label');
+    let droppedAscfUrl  = null;
+    let droppedAudioUrl = null;
+
+    dropZone.addEventListener('click', () => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.ascf,.mp3';
+        input.multiple = true;
+        input.onchange = e => handleFiles(e.target.files);
+        input.click();
+    });
+
+    ['dragenter', 'dragover'].forEach(evt =>
+        dropZone.addEventListener(evt, e => { e.preventDefault(); dropZone.classList.add('drag-over'); })
+    );
+    ['dragleave', 'drop'].forEach(evt =>
+        dropZone.addEventListener(evt, e => { e.preventDefault(); dropZone.classList.remove('drag-over'); })
+    );
+    dropZone.addEventListener('drop', e => handleFiles(e.dataTransfer.files));
+
+    // Also accept drops anywhere on the page
+    document.addEventListener('dragover', e => e.preventDefault());
+    document.addEventListener('drop', e => {
+        e.preventDefault();
+        if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
+    });
+
+    function handleFiles(files) {
+        // Revoke previous blob URLs to free memory
+        if (droppedAscfUrl)  { URL.revokeObjectURL(droppedAscfUrl);  droppedAscfUrl  = null; }
+        if (droppedAudioUrl) { URL.revokeObjectURL(droppedAudioUrl); droppedAudioUrl = null; }
+
+        let ascfFile = null, audioFile = null;
+        for (const file of files) {
+            if (file.name.endsWith('.ascf')) ascfFile  = file;
+            if (file.name.endsWith('.mp3'))  audioFile = file;
+        }
+        if (!ascfFile) { showError('No .ascf file found in dropped files.'); return; }
+
+        droppedAscfUrl  = URL.createObjectURL(ascfFile);
+        droppedAudioUrl = audioFile ? URL.createObjectURL(audioFile) : null;
+
+        dropZone.classList.add('has-file');
+        dropLabel.textContent = '▶ ' + ascfFile.name + (audioFile ? ' + ' + audioFile.name : '') + ' — playing...';
+
+        // Clear URL inputs so there's no conflict
+        ascfInput.value  = '';
+        audioInput.value = '';
+        hideError();
+        startPlayback(droppedAscfUrl, droppedAudioUrl);
+    }
+
+    function startPlayback(ascfUrl, audioUrl) {
+        if (player) { player.stop(); player = null; }
+
+        playerContainer.innerHTML = `
+            <div class="status" style="position:absolute;top:8px;left:12px;z-index:10;font-size:0.7em;color:#00ff4199;"></div>
+            <pre class="ascii-player"></pre>
+            <canvas class="ascii-canvas"></canvas>
+            <audio class="ascii-audio" preload="none"></audio>
+        `;
+        canvasWrap.classList.add('active');
+
+        try {
+            player = new AscilinePlayer(playerContainer);
+            player.play(ascfUrl, audioUrl).catch(err => {
+                showError('Playback error: ' + err.message +
+                    (err.message.includes('fetch') ? ' — Make sure you are running a local server (python -m http.server 8080) or use Drag & Drop instead.' : ''));
+            });
+        } catch(e) {
+            showError('Failed to start player: ' + e.message);
+        }
+    }
+
+    playBtn.addEventListener('click', async () => {
+        const ascfUrl = ascfInput.value.trim();
+        if (!ascfUrl) { showError('Please enter a .ascf filename.'); return; }
+        hideError();
+        dropZone.classList.remove('has-file');
+        dropLabel.textContent = 'Drop .ascf file here to play instantly';
+        startPlayback(ascfUrl, audioInput.value.trim() || null);
+    });
 </script>
 
 </body>

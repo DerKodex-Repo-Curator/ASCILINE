@@ -16,6 +16,14 @@ class ByteStreamParser {
         this.buffer = this.buffer.subarray(bytes);
         return data;
     }
+
+    // Push bytes back to the front of the buffer (for header rollback)
+    unshift(chunk) {
+        const newBuf = new Uint8Array(chunk.length + this.buffer.length);
+        newBuf.set(chunk, 0);
+        newBuf.set(this.buffer, chunk.length);
+        this.buffer = newBuf;
+    }
     
     get length() { return this.buffer.length; }
 }
@@ -72,6 +80,10 @@ class AscilinePlayer {
         this.fetchAbortController = null;
         this.decodeQueue = Promise.resolve();
         this.pendingDecodes = 0;
+
+        this.totalFrames = 0;   // read from header
+        this.totalDuration = 0; // seconds, derived from totalFrames / targetFps
+        this.currentTime = 0;   // seconds, updated each rendered frame
 
         this.renderFrame = this.renderFrame.bind(this);
         this.togglePause = this.togglePause.bind(this);
@@ -215,25 +227,39 @@ class AscilinePlayer {
             let headerParsed = false;
             
             while (this.isStreaming) {
-                if (this.frameBuffer.length >= 300) {
+                if (this.frameBuffer.length >= 90) {
                     await new Promise(r => setTimeout(r, 50));
                     continue;
                 }
                 const { done, value } = await reader.read();
                 if (value) parser.push(value);
                 
-                if (!headerParsed && parser.length >= 14) {
-                    const header = parser.read(14);
-                    const magic = textDecoder.decode(header.subarray(0, 4));
-                    if (magic !== 'ASCF') throw new Error("Invalid ASCF file");
-                    
-                    const view = new DataView(header.buffer, header.byteOffset, header.byteLength);
+                if (!headerParsed && parser.length >= 18) {
+                    // Read 18 bytes and detect format by magic:
+                    // 'ASCF' = legacy 14-byte header (no totalFrames)
+                    // 'ASC2' = v2 18-byte header (includes totalFrames uint32)
+                    const headerBytes = parser.read(18);
+                    const magic = textDecoder.decode(headerBytes.subarray(0, 4));
+                    if (magic !== 'ASCF' && magic !== 'ASC2') throw new Error("Invalid ASCF file");
+
+                    const view = new DataView(headerBytes.buffer, headerBytes.byteOffset, headerBytes.byteLength);
                     this.targetFps = view.getFloat32(4, false);
                     this.renderMode = view.getUint8(8);
                     this.pixelMode = view.getUint8(9) === 1;
                     const cols = view.getUint16(10, false);
                     const rows = view.getUint16(12, false);
-                    
+
+                    if (magic === 'ASC2') {
+                        // v2: last 4 bytes are totalFrames
+                        this.totalFrames = view.getUint32(14, false);
+                        this.totalDuration = this.totalFrames > 0 ? this.totalFrames / this.targetFps : 0;
+                    } else {
+                        // Legacy 'ASCF': no totalFrames — push the 4 extra bytes back as frame data
+                        this.totalFrames = 0;
+                        this.totalDuration = 0;
+                        parser.unshift(headerBytes.subarray(14, 18));
+                    }
+
                     this.buildCanvas(cols, rows);
                     
                     if (typeof AscilineCodec !== 'undefined' && this.renderMode > 1) {
@@ -355,6 +381,7 @@ class AscilinePlayer {
 
         const frameObj = this.frameBuffer.shift();
         const frame = frameObj.data;
+        this.currentTime = frameObj.time;
 
         this.frameCount++;
         if (now - this.lastFpsUpdate >= 1000) {
@@ -363,8 +390,11 @@ class AscilinePlayer {
             this.lastFpsUpdate = now;
             const modes = { 2: '64 Color', 3: '512 Color', 4: '32K Color', 5: '262K Color', 6: '16M Ultra' };
             const label = (modes[this.renderMode] || 'B&W') + (this.pixelMode ? ' PIXEL' : '');
+            const elapsed = this.currentTime;
+            const fmt = t => `${String(Math.floor(t/60)).padStart(2,'0')}:${String(Math.floor(t%60)).padStart(2,'0')}`;
+            const timeStr = this.totalDuration > 0 ? ` | ${fmt(elapsed)} / ${fmt(this.totalDuration)}` : '';
             if (this.statusEl) {
-                this.statusEl.textContent = `FPS: ${this.currentFps}/${Math.round(this.targetFps)} | Buf: ${this.frameBuffer.length} | ${label}`;
+                this.statusEl.textContent = `FPS: ${this.currentFps}/${Math.round(this.targetFps)} | Buf: ${this.frameBuffer.length}${timeStr} | ${label}`;
             }
         }
 

@@ -118,19 +118,20 @@ def compile_video(args):
     frame_buf = np.empty((rows, cols, 4), dtype=np.uint8) if render_mode > 1 else None
 
     with open(ascf_path, "wb") as f_out:
-        # Write Header (14 bytes)
-        # Magic: 'ASCF' (4)
+        # Write Header (18 bytes) — magic 'ASC2' identifies v2 format
+        # Magic: 'ASC2' (4)  -- 'ASCF' = legacy 14-byte header, 'ASC2' = 18-byte with totalFrames
         # FPS: float32 (4)
         # Mode: uint8 (1)
         # Pixel: uint8 (1)
         # Cols: uint16 (2)
         # Rows: uint16 (2)
-        header = struct.pack(">4sfBBHH", b"ASCF", effective_fps, render_mode, int(pixel_mode), cols, rows)
+        # Total frames: uint32 (4)  -- written as 0, patched after compile
+        header = struct.pack(">4sfBBHHI", b"ASC2", effective_fps, render_mode, int(pixel_mode), cols, rows, 0)
         f_out.write(header)
         
         frame_index = 0
         prev_frame = None
-        bytes_written = 14
+        bytes_written = 18
         
         try:
             while True:
@@ -188,6 +189,11 @@ def compile_video(args):
         finally:
             decoder.release()
 
+    # Patch total frame count into header (offset 14, uint32 big-endian)
+    with open(ascf_path, "r+b") as f_patch:
+        f_patch.seek(14)
+        f_patch.write(struct.pack(">I", frame_index))
+
     print(f"\n[Compiler] Done! Total frames: {frame_index}. Output saved to {ascf_path} ({(bytes_written / 1024 / 1024):.2f} MB)")
 
 
@@ -206,4 +212,12 @@ if __name__ == "__main__":
     parser.add_argument("--out", type=str, default="", help="Output base name")
     
     args = parser.parse_args()
+    
+    # Automatically enable pixel mode and color mode 6 if profile is requested
+    if args.profile:
+        args.pixel = True
+        
+    if args.pixel and args.mode == 1:
+        args.mode = 6
+
     compile_video(args)

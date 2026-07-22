@@ -40,8 +40,21 @@ def get_video_dimensions(decoder):
 def compile_video(args):
     video_path = args.video
     if not os.path.exists(video_path):
-        print(f"Error: File not found -> {video_path}")
-        return
+        compiler_dir = os.path.dirname(os.path.abspath(__file__))
+        root_dir = os.path.abspath(os.path.join(compiler_dir, '..'))
+        
+        # Check 1: Inside the static_player folder itself
+        fallback_1 = os.path.join(compiler_dir, video_path)
+        # Check 2: Inside the root project's videos/ folder
+        fallback_2 = os.path.join(root_dir, 'videos', video_path)
+        
+        if os.path.exists(fallback_1):
+            video_path = fallback_1
+        elif os.path.exists(fallback_2):
+            video_path = fallback_2
+        else:
+            print(f"Error: File not found -> {args.video} (Also checked static_player/ and videos/ folders)")
+            return
 
     out_name = args.out or os.path.splitext(os.path.basename(video_path))[0]
     out_dir = os.path.dirname(os.path.abspath(__file__))

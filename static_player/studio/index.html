@@ -106,7 +106,13 @@
     Turn a video into a compiled <code>.ascf</code> entirely in your browser, then play it back.
     No server, no upload: the file never leaves your machine. Compiling uses the same
     <code>codec.js</code> wire format the player reads, so the output runs anywhere ASCILINE runs.
-    Pixel mode (color). Audio and ASCII character modes come from the Python <code>compiler.py</code>.
+    <br><br>
+    <strong>Note:</strong> In-browser compiling supports Pixel mode only (no audio). For ASCII text rendering and audio extraction, use the Python <code>compiler.py</code>.
+    <br><br>
+    <span style="color: var(--danger); font-weight: 500;">
+      The Studio player buffers the entire video into RAM to enable seamless seeking. It is designed for short clips. 
+      For videos longer than 2 minutes, please use the main <a href="../index.html">Static Player</a> which supports infinite RAM-less streaming.
+    </span>
   </p>
 
   <div class="grid">
